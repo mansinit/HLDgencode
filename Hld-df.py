@@ -176,40 +176,36 @@ def verify_hostname(hld_df,hostname_list,i):
 def verify_linkset_name(remote_df,hld_df,file,remote_sheet):
     #for remote_row in range(0,(remote_df[remote_df.columns[0]].count())-1):
     #print(remote_df["Number of Links"][remote_row])
-    if ( remote_df['LinkSet Name'].isnull().values.all()):
-        new_remote_df=remote_df.loc[remote_df["Number of Links"].notnull()]
-        print(new_remote_df["Number of Links"])
-        list=[]
         i=0
-        list2=[]
+        flag=True
+        new_remote_df=remote_df.loc[remote_df["Number of Links"].notnull()]
         for new_remote_row in range(0,(new_remote_df.shape[0])):
             no_of_links=int(new_remote_df["Number of Links"][i])
             new_link=i+no_of_links
             for row in range(i,new_link):      
-                conc_interface=re.sub(",","_",remote_df["Interface"][row]) if "," in remote_df["Interface"][row] else remote_df["Interface"][row]
-                linkset_name=hld_df["DRA"+str(file)+".Node"][row]+"_"+remote_df["Peer Name"][row]+"_"+conc_interface
-                list.append(linkset_name)
+                if ( remote_df['LinkSet Name'].isnull().values.all()):
+                    conc_interface=re.sub(",","_",remote_df["Interface"][row]) if "," in remote_df["Interface"][row] else remote_df["Interface"][row]
+                    linkset_name=hld_df["DRA"+str(file)+".Node"][row]+"_"+remote_df["Peer Name"][row]+"_"+conc_interface
+                   
+                else:
+                    linkset_name=remote_df['LinkSet Name'][row]
                 if i!=0:
                     link_name=linkset_name+"_"+f"{row-i:02}"
                 else:
                     link_name=linkset_name+"_"+f"{row:02}"
-                logger.info(hld_df["DRA"+str(file)+".LinkSet Name"][row])
-                logger.info(linkset_name)
                 if hld_df["DRA"+str(file)+".LinkSet Name"][row]==linkset_name :
-                    logger.info("Matched")
                     pass
                 else:
                     logger.error("Link Set Name is not correct for DRA"+str(file)+" in "+remote_sheet)
-                logger.info(hld_df["DRA"+str(file)+".Link Name"][row])
-                logger.info(link_name)
+                    flag=False
                 if hld_df["DRA"+str(file)+".Link Name"][row]==link_name:
                     pass
                 else:
                     logger.error("Link Name is not correct for DRA"+str(file)+" in "+remote_sheet)
+                    flag=False
                 
             i=new_link
-        print(list2)
-            
+        return flag 
 
 if (verify_mated_pair(all_me_file1,all_me_file2,'MDA-1'))==True:
     dra_dict={}
@@ -272,8 +268,13 @@ if (verify_mated_pair(all_me_file1,all_me_file2,'MDA-1'))==True:
                 else:
                     print("***************FAILED*******************")
                     logger.error("DRA"+str(i)+" HOST NAME doesn't match with the value found in the "+hld_sheet)
-                (verify_linkset_name(remote_df,hld_df,i,remote_sheet))
-            
+                
+                
+                if (verify_linkset_name(remote_df,hld_df,i,remote_sheet)):
+                    print("DRA"+str(i)+" LinkSet Name for all rows matches with the value inferred")
+                    print("DRA"+str(i)+" Link Name for all rows matches with the value inferred")
+                else:
+                    print("***************FAILED*******************")
             
                 
             

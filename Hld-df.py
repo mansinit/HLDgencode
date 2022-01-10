@@ -30,6 +30,7 @@ HOSTNAME="Not Listed" #{'Defined','Default','Not Listed'}
 CPU_THRESHOLD=30
 EXCLUDE_CLINK_MODULE="No"
 final_mid_list=[]
+final_mid_ip_dict={}
 if HOSTNAME=="Not Listed":
     HN=input("Please write the hostname")
     DN=input("Please write the Domain name")
@@ -257,13 +258,13 @@ def get_mid(cpu_df,file,node_name):
     return (cpu_df['new_module'].tolist())
 
 def verify_mid(hld_df,file,mid_list):
-    final_mid_list=mid_list[0:hld_df.shape[0]]
     if EXCLUDE_CLINK_MODULE=="Yes":
         getipv4_from_allmefile("ADD IPADDR",file)
     else:
         return ((hld_df["DRA"+str(file)+".MID"]).isin(mid_list[0:hld_df.shape[0]])).all(axis=0)
 
-def get_primary_secondary_ip(hld_df,file,ipversion):
+def verify_primary_secondary_ip(hld_df,file,ipversion,remote_df):
+    flag=True
     for i in range(0,hld_df.shape[0]):
         iplist=[]
         count=0
@@ -292,23 +293,37 @@ def get_primary_secondary_ip(hld_df,file,ipversion):
                             if  dict_ifm["ADD MODULE:MID"] not in ifmid_list:
                                 ifmid_list.append(dict_ifm["ADD MODULE:MID"])
                                 count+=1
-                if count==2:
-                        break  
+                if remote_df["Link Homing"][0]=="Single":
+                    break
+                elif count==2 and remote_df["Link Homing"][0]=="Multi":
+                    break  
             for ifmid in ifmid_list:
                 with open(dict_files["all_me_file"+str(file)],'r') as file1:
                     for line in file1:
-                        if "ADD IPADDR:ADDRNAME" and "IPVER=IPV4" in line:
+                        if "ADD IPADDR:ADDRNAME" and "IPVER="+ipversion in line:
                             if "IFMMID="+str(ifmid) in line:
                                 final_line=line.split(',')
                                 break
-                    #print(final_line)
                     for value in final_line:
                         name=value.split('=')
                         dict[name[0]]=name[1].strip("\"\"")
-                        if name[0]=="IPV41" and ipversion=="IPV4" and dict[name[0]] not in iplist:
+                        if name[0]==ipversion+"1" and dict[name[0]] not in iplist:
                             iplist.append(dict[name[0]])
-            print(iplist)
+            if iplist[0]==hld_df['DRA'+str(file)+'.Primary IP'][i]:
+                if remote_df["Link Homing"][0]=="Multi":
+                    if iplist[1]==hld_df['DRA'+str(file)+'.Secondary IP'][i]:
+                        pass
+                    else:
+                        logger.error("Derived Secondary ip from file"+file+" doesn't match with the value in hld file")
+                else:
+                    pass
+            else:
+                logger.error("Derived Primary ip from file"+file+" doesn't match with the value in hld file")
+                flag=False
+    return (flag)
 
+
+    
 if (verify_mated_pair(all_me_file1,all_me_file2,'MDA-1'))==True:
     dra_dict={}
     cpu_df=pd.DataFrame(cpu_file)
@@ -392,8 +407,13 @@ if (verify_mated_pair(all_me_file1,all_me_file2,'MDA-1'))==True:
                 else:
                     print("***************Check the log file for errors*******************")
                     logger.error("DRA"+str(i)+" "+"MID doesn't match with the value inferred from CPU file for "+hld_sheet)
-                get_primary_secondary_ip(hld_df,i,"IPV4")
-            
+                
+                if verify_primary_secondary_ip(hld_df,i,hld_df["RemoteNode.IPv4/IPv6"][0],remote_df):
+                    print("DRA"+str(i)+" Primary/Secondary IP for all rows matches with the value inferred from ALLME file for "+hld_sheet)
+                else:
+                    print("***************Check the log file for errors*******************")
+                    logger.error("DRA"+str(i)+" "+"Primary/Secondary IP  doesn't match with the value inferred from ALLME file for "+hld_sheet)
+       
 else:
     print("***************Check the log file for errors*******************")
     logger.error("This is not Mated DRA")

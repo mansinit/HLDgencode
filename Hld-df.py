@@ -3,44 +3,8 @@ import re
 import pandas as pd
 import numpy as np
 from pandas.core.reshape.concat import concat
-remote_file_name='TC-1 Final/2150/Remote_Node_Details.xlsx'
-remote_file = pd.ExcelFile(remote_file_name,engine='openpyxl')
-hld_file_name='TC-1 Final/2150/HLD_NEWNODE_2150.xlsx'
-hld_file= pd.ExcelFile(hld_file_name,engine='openpyxl')
-cpu_file_name='TC-1 Final/2150/CPUUsageMeasurement.csv'
-cpu_file= pd.read_csv(cpu_file_name)
-all_me_file1="C://Users//mdhingra//RobotFrameworkProjects//Bharti MANO//hld//TC-1 Final//2150//ALLME_20210614033028.txt"
-all_me_file2='C://Users//mdhingra//RobotFrameworkProjects//Bharti MANO//hld//TC-1 Final//2150//ALLME_20210614033049.txt'
-dict_files={}
-dict_files["all_me_file1"]=all_me_file1
-dict_files["all_me_file2"]=all_me_file2
-HNSELECTION_DRA1="Defined"
-HNSELECTION_DRA2="Not Listed"
-hn_dict={}
-hn_dict["HNSELECTION_DRA1"]=HNSELECTION_DRA1
-hn_dict["HNSELECTION_DRA2"]=HNSELECTION_DRA2
-mated_pair_flag=False
-DRA_IP_TYPE="Different" #peer names will be same {'different','same'}
-interface_dict={'S6a': 'S6a/S6d', 
-'Gy':'Gy/Ro', 
-'Cx':'Cx/Dx', 
-'Sh':'Sh/Dh', 
-'S13':'S13/S13-Bis'
-}
-HOSTNAME="Not Listed" #{'Defined','Default','Not Listed'}
-CPU_THRESHOLD=30
-EXCLUDE_CLINK_MODULE="No"
-REGPORTFLAG="NO"
-final_mid_list=[]
-final_mid_ip_dict={}
-dra_lport_list1=[]
-dra_lport_list2=[]
-if HOSTNAME=="Not Listed":
-    HN=input("Please write the hostname")
-    DN=input("Please write the Domain name")
-    mename_input=input("Please provide me name")
-if REGPORTFLAG=="YES":
-    regport=input("Please enter the registered port")
+import glob
+import configparser
 # importing module
 import logging
 # Create and configure logger
@@ -52,22 +16,66 @@ logger = logging.getLogger()
 # Setting the threshold of logger to DEBUG
 logger.setLevel(logging.DEBUG)
 
-def verify_mated_pair(all_me_file1,all_me_file2,string):
+#### Config section for input variables from user
+config = configparser.ConfigParser()
+config.sections()
+config.read('input_variables.ini')
+
+####### Find Files Section ########
+hld_file=glob.glob('C:\\Users\\mdhingra\\RobotFrameworkProjects\\Bharti MANO\\hld\\Testdata\\HLD*.xlsx')
+cpu_file_name='Testdata/CPUUsageMeasurement.csv'
+remote_file_name='Testdata/Remote_Node_Details.xlsx'
+all_me_files=glob.glob('C:\\Users\\mdhingra\\RobotFrameworkProjects\\Bharti MANO\\hld\\Testdata\\ALLME_*.txt')
+
+###### Read Files Section #########
+hld_file_name=hld_file[0]
+remote_file = pd.ExcelFile(remote_file_name,engine='openpyxl')
+hld_file= pd.ExcelFile(hld_file_name,engine='openpyxl')
+cpu_file= pd.read_csv(cpu_file_name)
+
+###### Global dictionary and lists #######
+dict_files={}
+hn_dict={}
+dra_lport_list1=[]
+dra_lport_list2=[]
+
+###### Variable assignment from ini file ########
+HNSELECTION_DRA1=config['Default']['HNSELECTION_DRA1']
+HNSELECTION_DRA2=config['Default']['HNSELECTION_DRA2']
+
+hn_dict["HNSELECTION_DRA1"]=HNSELECTION_DRA1
+hn_dict["HNSELECTION_DRA2"]=HNSELECTION_DRA2
+
+DRA_IP_TYPE=config['Default']['DRA_IP_TYPE'] #peer names will be same {'different','same'}
+
+
+###### Hardcoded dictionary assignment ########
+interface_dict={'S6a': 'S6a/S6d', 
+'Gy':'Gy/Ro', 
+'Cx':'Cx/Dx', 
+'Sh':'Sh/Dh', 
+'S13':'S13/S13-Bis'
+}
+mated_pair_flag=False
+#HOSTNAME="Not Listed" #{'Defined','Default','Not Listed'}
+CPU_THRESHOLD=int(config['Default']['CPU_THRESHOLD'])
+EXCLUDE_C_LINK_MODULE=config['Default']['EXCLUDE_C_LINK_MODULE']
+REGPORTFLAG=config['Default']['REGPORTFLAG']
+
+def verify_mated_pair(all_me_files,string):
     final_line=[]
-    with open(all_me_file1,'r') as file1:
+    with open(all_me_files[0],'r') as file1:
         for line in file1:
             if string in line:
                 final_line=line.split(',')
-        print(final_line)
         for value in final_line:
             if "HN" in value:
                 final_HN=value
-        with open(all_me_file2,'r') as file2:
+        with open(all_me_files[1],'r') as file2:
             for line in file2:
                 if "ADD DA" in line:
                     if final_HN in line:
                         mated_pair_flag=True
-                        print("Mated Pair Verified")
                         break
     return mated_pair_flag
 
@@ -109,7 +117,6 @@ def verify_remote_interface(remote_df,remote_interface_list):
 def get_interface(remote_df,hld_df):
     interface_list=[]
     deconc_interface_list=[]
-    print(remote_df[remote_df.columns[0]].count())
     for remote_row in range(0,remote_df[remote_df.columns[0]].count()-1):
         if (remote_df['Peer Name'][remote_row]==remote_df['Peer Name'][remote_row+1]) & (remote_df['FQDN'][remote_row]==remote_df['FQDN'][remote_row+1]) & (remote_df['Domain'][remote_row]==remote_df['Domain'][remote_row+1]):
             interface_list=remote_df['Interface'].unique().tolist()
@@ -160,7 +167,8 @@ def get_dra_node_mename(file,string):
     with open(file,'r') as file1:  
         for line in file1:
             if string in line:
-                final_line=line.split(',')
+                if 'METYPE=SPS' in line:
+                    final_line=line.split(',')
         dict={}
         for value in final_line:
             name=value.split('=')
@@ -191,17 +199,18 @@ def get_host_domain(file,string,mename,string_hn_or_dn):
                                 hn_dn_list.append(dict[name[0]])
                                 break
                 if hn_dict["HNSELECTION_DRA"+str(file)]=="Not Listed":
-                    if string_hn_or_dn=="HN" and (mename_input in dict.values() or HN in dict.values()):
+                    if string_hn_or_dn=="HN" and (config['HN_NOT_LISTED_SECTION_DRA'+str(file)]['DANAME'] in dict.values() and config['HN_NOT_LISTED_SECTION_DRA'+str(file)]['HN'] in dict.values()):
                             logger.error("DRA"+str(file)+" Hostname should not have been listed in ALLME file")
-                    elif string_hn_or_dn=="HN" and (mename_input in dict.values() or DN in dict.values()):
+                            flag=False
+                    elif string_hn_or_dn=="DN" and (config['HN_NOT_LISTED_SECTION_DRA'+str(file)]['DANAME'] in dict.values() and config['HN_NOT_LISTED_SECTION_DRA'+str(file)]['DOMAIN'] in dict.values()):
                             logger.error("DRA"+str(file)+" Domain should not have been listed in ALLME file")
-                    flag=False
+                            flag=False
                     break
     if hn_dict["HNSELECTION_DRA"+str(file)]=="Not Listed" and flag==True: 
         if string_hn_or_dn=="HN":
-            hn_dn_list.append(HN)
+            hn_dn_list.append(config['HN_NOT_LISTED_SECTION_DRA'+str(file)]['HN'])
         else:
-            hn_dn_list.append(DN)
+            hn_dn_list.append(config['HN_NOT_LISTED_SECTION_DRA'+str(file)]['DOMAIN'])
     return hn_dn_list
 
 
@@ -256,7 +265,6 @@ def getipv4_from_allmefile(string,file):
                 dict[name[0]]=name[1].strip("\"\"")
                 if name[0]=="IPV41" and dict[name[0]] not in iplist:
                     iplist.append(dict[name[0]])
-    print(iplist)
 
 def get_mid(cpu_df,file,node_name):
     mid_list=[]
@@ -269,12 +277,20 @@ def get_mid(cpu_df,file,node_name):
     cpu_df = cpu_df[cpu_df['peak_cpu_usage']<CPU_THRESHOLD]
     cpu_df=cpu_df.sort_values(by = ['peak_cpu_usage','module'])
     cpu_df['new_module']=(cpu_df['module'].str.extract('(\d+)'))
-    return (cpu_df['new_module'].tolist())
+    midlist= (cpu_df['new_module'].tolist())
+    return midlist
 
-def verify_mid(hld_df,file,mid_list):
-    if EXCLUDE_CLINK_MODULE=="Yes":
+def verify_mid(hld_df,file,mid_list,sheet):
+    if EXCLUDE_C_LINK_MODULE=="YES":
         getipv4_from_allmefile("ADD IPADDR",file)
     else:
+        if len(mid_list)==0:
+            logger.error("Check for the cpu threshold value")
+        elif len(mid_list)<hld_df.shape[0]:
+            logger.error("Insufficient mids available for DRA"+str(file)+" in "+sheet)
+        else:
+            if ((hld_df["DRA"+str(file)+".MID"]).isin(mid_list[0:hld_df.shape[0]])).all(axis=0)==False:
+                logger.error("DRA"+str(file)+" "+"MID doesn't match with the value inferred from CPU file for "+sheet)      
         return ((hld_df["DRA"+str(file)+".MID"]).isin(mid_list[0:hld_df.shape[0]])).all(axis=0)
 
 def verify_primary_secondary_ip(hld_df,file,ipversion,remote_df):
@@ -338,43 +354,52 @@ def verify_primary_secondary_ip(hld_df,file,ipversion,remote_df):
                 flag=False
     return (flag)
 
-def verify_regport(hld_df,file):
+def verify_regport(hld_df,file,sheet):
+    flag=True
     if REGPORTFLAG=="NO":
         status=(hld_df["DRA"+str(file)+".RegPortFlag"]==REGPORTFLAG).all(axis=0)
         if status:
             if hld_df["DRA"+str(file)+".Registered Port"].isnull().values.all():
                 return hld_df["DRA"+str(file)+".Registered Port"].isnull().values.all()
             else:
-                logger.error("Registered Port should be empty when regportflag is No for DRA"+str(file))
+                logger.error("Registered Port should be empty when regportflag is No for DRA"+str(file)+" in "+sheet)
+                return False
+        else:
+            flag=False
     else:
+        regport=int(config['REGPORT_SECTION']['REGPORT'])
         status=(hld_df["DRA"+str(file)+".RegPortFlag"]==REGPORTFLAG).all(axis=0)
         if status:
             with open(dict_files["all_me_file"+str(file)],'r') as file1:
                 for line in file1:
                     if "REGPORTFLAG=YES" and "REGPORT="+str(regport) in line:
-                        logger.error("Assigned Registered Port value should not be present in ALLME file for DRA"+str(file))
-                        flag=False
-                        break
-        if flag==True:
-            return (hld_df[hld_df["DRA"+str(file)+".Registered Port"]==regport]).all(axis=0)
+                        logger.error("Assigned Registered Port value should not be present in ALLME file for DRA"+str(file)+" in "+sheet)
+                        return False
+        else:
+            flag=False
+    if flag==False:
+        logger.error("Registered Port Flag should be "+hld_df["DRA"+str(file)+".RegPortFlag"][0]+" for DRA"+str(file)+" in "+sheet)
+        return flag
+    else:
+        return (hld_df["DRA"+str(file)+".Registered Port"]==regport).all(axis=0)
+    
 
-def verify_lport(hld_df,file,lport_list):
+def verify_lport(hld_df,file,lport_list,sheet):
     lport=(hld_df["DRA"+str(file)+".LPort"].tolist())
     if file==1:
         if any(x in dra_lport_list1 for x in lport):
-            logger.error("All LPORT should be unique for DRA1")
+            logger.error("All LPORT should be unique for DRA1 in "+sheet)
             return False
         else:
             dra_lport_list1.append(lport)
     elif file==2:
         if any(x in dra_lport_list2 for x in lport):
-            logger.error("All LPORT should be unique for DRA2")
+            logger.error("All LPORT should be unique for DRA2 in "+sheet)
             return False
         else:
             dra_lport_list2.append(lport)
-    print(lport)
     if any(x in lport_list for x in lport):
-        logger.error("Match found for lport. Execution should be stopped")
+        logger.error("Match found for DRA"+str(file)+".lport in "+sheet+". Execution should be stopped")
         return False
     else:
         return (True)
@@ -392,95 +417,103 @@ def get_lport_list(file):
     return lport_list
 
     
-if (verify_mated_pair(all_me_file1,all_me_file2,'MDA-1'))==True:
+if __name__=='__main__':
     dra_dict={}
+    if (verify_mated_pair(all_me_files,'MDA-1'))==True:
+        print("Mated pair check is done")
+    else:
+        logger.error("This is not Mated DRA, execution should have been stopped")
+    hld_df=pd.DataFrame(pd.read_excel(hld_file_name,sheet_name=hld_file.sheet_names[0],engine='openpyxl'))
+    for i in range(1,len(all_me_files)+1):
+        mename=get_dra_node_mename(all_me_files[i-1],"MENAME")
+        if mename==hld_df["DRA"+str(i)+".Node"][0]:
+            dict_files["all_me_file"+str(i)]=all_me_files[i-1]
+        else:
+            logger.error("Mename from ALLME file doesn't match with DRA"+str(i)+" Node")
+        
     cpu_df=pd.DataFrame(cpu_file)
     size={}
     hn_col_name=["Host Name","Domain"]
-    for i in range(1,len(dict_files)+1):
-        dra_dict["dra"+str(i)+"_node"]=get_dra_node_mename(dict_files["all_me_file"+str(i)],"MENAME")
-        dra_dict["dra"+str(i)+"_hostname"]=get_host_domain(i,"ADD DA",dra_dict["dra"+str(i)+"_node"],"HN")
-        dra_dict["dra"+str(i)+"_domainname"]=get_host_domain(i,"ADD DA",dra_dict["dra"+str(i)+"_node"],"DN")
-        dra_dict["dra"+str(i)+"_mid"]=get_mid(cpu_df,i,dra_dict["dra"+str(i)+"_node"])
-        dra_dict["dra"+str(i)+"_lport"]=get_lport_list(i)
-    print(dra_dict)
-    col_names=["Peer Name","FQDN","Domain","Protocol","IP version","Local Port","Node Role"]
-    for remote_sheet,hld_sheet in zip(remote_file.sheet_names,hld_file.sheet_names):
-        remote_df=pd.DataFrame(pd.read_excel(remote_file_name,sheet_name=remote_sheet,engine='openpyxl'))
-        hld_df=pd.DataFrame(pd.read_excel(hld_file_name,sheet_name=hld_sheet,engine='openpyxl'))
-        size[remote_sheet]=hld_df.shape[0]
-        verify_site=(verify_remote_hld_column(remote_df,hld_df,"Site Name"))
-        if DRA_IP_TYPE=="Different":
-            if verify_site==True:
-                print("Site Name for all rows matches in input and output for "+remote_sheet)
-            else:
-                logger.error("Site Name doesn't match for "+remote_sheet)
-            #verify_remote_interface(remote_df)
-            interface=get_interface(remote_df,hld_df)
-            print(interface)
-
-            if verify_hld_interface(interface,hld_df)==True:
-                print("Interfaces inferred from the input file and generated as per the output matches with the output interfaces for "+remote_sheet)
-            else:
-                logger.error("Interface inferred doesn't match for "+remote_sheet)
-
-            for col_name in col_names:
-                if verify_remote_hld_column(remote_df,hld_df,col_name):
-                    print(col_name+" for all rows matches in input and output for "+remote_sheet)
+    if len(dict_files)==len(all_me_files):
+        for i in range(1,len(dict_files)+1):
+            dra_dict["dra"+str(i)+"_node"]=get_dra_node_mename(dict_files["all_me_file"+str(i)],"MENAME")
+            dra_dict["dra"+str(i)+"_hostname"]=get_host_domain(i,"ADD DA",dra_dict["dra"+str(i)+"_node"],"HN")
+            dra_dict["dra"+str(i)+"_domainname"]=get_host_domain(i,"ADD DA",dra_dict["dra"+str(i)+"_node"],"DN")
+            dra_dict["dra"+str(i)+"_mid"]=get_mid(cpu_df,i,dra_dict["dra"+str(i)+"_node"])
+            dra_dict["dra"+str(i)+"_lport"]=get_lport_list(i)
+        col_names=["Peer Name","FQDN","Domain","Protocol","IP version","Local Port","Node Role"]
+        for remote_sheet,hld_sheet in zip(remote_file.sheet_names,hld_file.sheet_names):
+            remote_df=pd.DataFrame(pd.read_excel(remote_file_name,sheet_name=remote_sheet,engine='openpyxl'))
+            hld_df=pd.DataFrame(pd.read_excel(hld_file_name,sheet_name=hld_sheet,engine='openpyxl'))
+            size[remote_sheet]=hld_df.shape[0]
+            verify_site=(verify_remote_hld_column(remote_df,hld_df,"Site Name"))
+            if DRA_IP_TYPE=="Different":
+                if verify_site==True:
+                    print("Site Name for all rows matches in input and output for "+remote_sheet)
                 else:
-                    logger.error(col_name+" doesn't match for "+remote_sheet)
-            
-            if verify_link_homing(remote_df):
-                if verify_remote_hld_column(remote_df,hld_df,"Primary IP"):
-                    print("Primary IP values for all rows matches in input and output for "+remote_sheet)
-                else:
-                    logger.error("Primary IP doesn't match for "+remote_sheet)
-                if (remote_df['Link Homing']=="Multi").all(axis=0):
-                    if verify_remote_hld_column(remote_df,hld_df,"Secondary IP"):
-                        print("Secondary IP values for all rows matches in input and output for "+remote_sheet)
-                    else:
-                        logger.error("Secondary IP doesn't match for "+remote_sheet)
+                    logger.error("Site Name doesn't match for "+remote_sheet)
+                #verify_remote_interface(remote_df)
+                interface=get_interface(remote_df,hld_df)
 
-            for i in range(1,len(dict_files)+1):
-                if verify_dra_name_node(hld_df,dra_dict["dra"+str(i)+"_node"],i):
-                    print("DRA"+str(i)+" NAME NODE for all rows matches with the value found in the "+hld_sheet)
+                if verify_hld_interface(interface,hld_df)==True:
+                    print("Interfaces inferred from the input file and generated as per the output matches with the output interfaces for "+remote_sheet)
                 else:
-                    logger.error("DRA"+str(i)+" NAME NODE doesn't match with the value found in the "+hld_sheet)
-                list_name=[]
-                for name in hn_col_name:
-                    if name=="Host Name":
-                        list_name=dra_dict["dra"+str(i)+"_hostname"]
+                    logger.error("Interface inferred doesn't match for "+remote_sheet)
+
+                for col_name in col_names:
+                    if verify_remote_hld_column(remote_df,hld_df,col_name):
+                        print(col_name+" for all rows matches in input and output for "+remote_sheet)
                     else:
-                        list_name=dra_dict["dra"+str(i)+"_domainname"]
-                    if verify_host_domain(hld_df,list_name,i,name):
-                        print("DRA"+str(i)+" "+str(name)+" for all rows matches with the value found in the "+hld_sheet)
+                        logger.error(col_name+" doesn't match for "+remote_sheet)
+                
+                if verify_link_homing(remote_df):
+                    if verify_remote_hld_column(remote_df,hld_df,"Primary IP"):
+                        print("Primary IP values for all rows matches in input and output for "+remote_sheet)
                     else:
-                        logger.error("DRA"+str(i)+" "+str(name)+" doesn't match with the value found in the "+hld_sheet)
+                        logger.error("Primary IP doesn't match for "+remote_sheet)
+                    if (remote_df['Link Homing']=="Multi").all(axis=0):
+                        if verify_remote_hld_column(remote_df,hld_df,"Secondary IP"):
+                            print("Secondary IP values for all rows matches in input and output for "+remote_sheet)
+                        else:
+                            logger.error("Secondary IP doesn't match for "+remote_sheet)
+
+                for i in range(1,len(dict_files)+1):
+                    if verify_dra_name_node(hld_df,dra_dict["dra"+str(i)+"_node"],i):
+                        print("DRA"+str(i)+" NAME NODE for all rows matches with the value found in the "+hld_sheet)
+                    else:
+                        logger.error("DRA"+str(i)+" NAME NODE doesn't match with the value found in the "+hld_sheet)
+                    list_name=[]
+                    for name in hn_col_name:
+                        if name=="Host Name":
+                            list_name=dra_dict["dra"+str(i)+"_hostname"]
+                        else:
+                            list_name=dra_dict["dra"+str(i)+"_domainname"]
+                        if verify_host_domain(hld_df,list_name,i,name):
+                            print("DRA"+str(i)+" "+str(name)+" for all rows matches with the value found in the "+hld_sheet)
+                        else:
+                            logger.error("DRA"+str(i)+" "+str(name)+" doesn't match with the value found in the "+hld_sheet)
+                        
                     
+                    if (verify_linkset_name(remote_df,hld_df,i,remote_sheet)):
+                        print("DRA"+str(i)+" LinkSet Name for all rows matches with the value inferred for "+hld_sheet)
+                        print("DRA"+str(i)+" Link Name for all rows matches with the value inferred for "+hld_sheet)
+                    
+                    if len(dra_dict["dra"+str(i)+"_mid"])!=0:
+                        if verify_mid(hld_df,i,dra_dict["dra"+str(i)+"_mid"],hld_sheet):
+                            print("DRA"+str(i)+" MID for all rows matches with the value inferred from CPU file for "+hld_sheet)
                 
-                if (verify_linkset_name(remote_df,hld_df,i,remote_sheet)):
-                    print("DRA"+str(i)+" LinkSet Name for all rows matches with the value inferred for "+hld_sheet)
-                    print("DRA"+str(i)+" Link Name for all rows matches with the value inferred for "+hld_sheet)
-                
-                
-                if verify_mid(hld_df,i,dra_dict["dra"+str(i)+"_mid"]):
-                    print("DRA"+str(i)+" MID for all rows matches with the value inferred from CPU file for "+hld_sheet)
-                else:
-                    logger.error("DRA"+str(i)+" "+"MID doesn't match with the value inferred from CPU file for "+hld_sheet)
-                
-                if verify_primary_secondary_ip(hld_df,i,hld_df["RemoteNode.IPv4/IPv6"][0],remote_df):
-                    print("DRA"+str(i)+" Primary/Secondary IP for all rows matches with the value inferred from ALLME file for "+hld_sheet)
-                else:
-                    logger.error("DRA"+str(i)+" "+"Primary/Secondary IP  doesn't match with the value inferred from ALLME file for "+hld_sheet)
+                    if verify_primary_secondary_ip(hld_df,i,hld_df["RemoteNode.IPv4/IPv6"][0],remote_df):
+                        print("DRA"+str(i)+" Primary/Secondary IP for all rows matches with the value inferred from ALLME file for "+hld_sheet)
+                    else:
+                        logger.error("DRA"+str(i)+" "+"Primary/Secondary IP  doesn't match with the value inferred from ALLME file for "+hld_sheet)
 
-                if verify_regport(hld_df,i):
-                    print("DRA"+str(i)+" RegPortFlag and Registered Port column verified for "+hld_sheet)
+                    if verify_regport(hld_df,i,hld_sheet):
+                        print("DRA"+str(i)+" RegPortFlag and Registered Port column verified for "+hld_sheet)
 
-                if verify_lport(hld_df,i,dra_dict["dra"+str(i)+"_lport"]):
-                    print("DRA"+str(i)+" LPORT column has been verified for "+hld_sheet)
+                    if verify_lport(hld_df,i,dra_dict["dra"+str(i)+"_lport"],hld_sheet):
+                        print("DRA"+str(i)+" LPORT column has been verified for "+hld_sheet)
+                print("*****************************************"+hld_sheet+" columns verified ******************************************")
 
-else:
-    logger.error("This is not Mated DRA, execution should have been stopped")
 
 if os.stat("newfile.log").st_size!=0:
     print("***************Check the log file for errors*******************")

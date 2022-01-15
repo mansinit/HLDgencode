@@ -129,7 +129,6 @@ def get_interface(remote_df,hld_df):
     else:
         interface_list=remote_df['Interface'].unique().tolist()
     interface_list=  [x.strip(' ') for x in interface_list]
-    logger.info(interface_list)
     for interface in interface_list:
         if ',' not in interface:
             deconc_interface_list.append(interface)
@@ -142,14 +141,11 @@ def get_interface(remote_df,hld_df):
     if (verify_remote_interface(remote_df,deconc_interface_list))==True:
         print("All the interfaces are verified for: "+remote_sheet)
         final_interface='&'.join(lookup_interface_list)
-        logger.info(final_interface)
         return final_interface
     else:
-        logger.info(lookup_interface_list)
         logger.error("Interfaces does not match from the lookup table")
 
 def verify_hld_interface(interface,hld_df):
-    logger.info(hld_df['RemoteNode.Interface'][0]==interface)
     return ((hld_df['RemoteNode.Interface'] == interface).all(axis=0))
 
 def verify_link_homing(remote_df):
@@ -279,7 +275,7 @@ def verify_linkset_name(remote_df,hld_df,file,remote_sheet):
                 if hld_df["DRA"+str(file)+".LinkSet Name"][row]==linkset_name :
                     pass
                 else:
-                    logger.error("Link Set Name is not correct for DRA"+str(file)+" in "+remote_sheet)
+                    logger.error("Link Set Name is not correct for "+str(row+1)+" DRA"+str(file)+" in "+remote_sheet)
                     flag=False
                 if hld_df["DRA"+str(file)+".Link Name"][row]==link_name:
                     pass
@@ -366,7 +362,6 @@ def verify_primary_secondary_ip(hld_df,file,ipversion,remote_df):
                             break
                         elif count==2 and remote_df["Link Homing"][0]=="Multi":
                             break  
-            logger.info(ifmid_list)
             if len(ifmid_list)==0:
                 logger.error("No IFMMID found in ADD IPADDR section")
                 flag=False
@@ -384,18 +379,17 @@ def verify_primary_secondary_ip(hld_df,file,ipversion,remote_df):
                             dict[name[0]]=name[1].strip("\"\"")
                             if name[0]==ipversion+"1" and dict[name[0]] not in iplist:
                                 iplist.append(dict[name[0]])
-            logger.info(iplist)
             if len(iplist)!=0:
                 if iplist[0]==hld_df['DRA'+str(file)+'.Primary IP'][i]:
                     if remote_df["Link Homing"][0]=="Multi":
                         if iplist[1]==hld_df['DRA'+str(file)+'.Secondary IP'][i]:
                             pass
                         else:
-                            logger.error("Derived Secondary ip from file"+file+" doesn't match with the value in hld file")
+                            logger.error("Derived Secondary ip for DRA"+str(file)+" doesn't match with the value in hld file")
                     else:
                         pass
                 else:
-                    logger.error("Derived Primary ip from file"+file+" doesn't match with the value in hld file")
+                    logger.error("Derived Primary ip for DRA"+str(file)+" doesn't match with the value in hld file")
                     flag=False
     return (flag)
 
@@ -410,6 +404,7 @@ def verify_regport(hld_df,file,sheet):
                 logger.error("Registered Port should be empty when regportflag is No for DRA"+str(file)+" in "+sheet)
                 return False
         else:
+            logger.error("Registered Port Flag should be No for all rows in DRA"+str(file))
             flag=False
     else:
         regport=int(config['REGPORT_SECTION']['REGPORT'])
@@ -421,13 +416,18 @@ def verify_regport(hld_df,file,sheet):
                         logger.error("Assigned Registered Port value should not be present in ALLME file for DRA"+str(file)+" in "+sheet)
                         return False
         else:
+            logger.error("Registered Port Flag should be Yes for all rows in DRA"+str(file))
             flag=False
     if flag==False:
         logger.error("Registered Port Flag should be "+hld_df["DRA"+str(file)+".RegPortFlag"][0]+" for DRA"+str(file)+" in "+sheet)
-        return flag
+        
     else:
-        return (hld_df["DRA"+str(file)+".Registered Port"]==regport).all(axis=0)
-    
+        if (hld_df["DRA"+str(file)+".Registered Port"]==regport).all(axis=0):
+            flag= True
+        else:
+            logger.error("Registered Port value doesn't match with the input given for DRA"+str(file)+ " in "+sheet)
+            flag= False
+    return flag
 
 def verify_lport(hld_df,file,lport_list,sheet):
     lport=(hld_df["DRA"+str(file)+".LPort"].tolist())
@@ -471,7 +471,6 @@ if __name__=='__main__':
     hld_df=pd.DataFrame(pd.read_excel(hld_file_name,sheet_name=hld_file.sheet_names[0],engine='openpyxl'))
     for i in range(1,len(all_me_files)+1):
         daname_list=get_dra_node_daname(i,"ADD DA:DANAME",mename_list)
-        logger.info(daname_list)
         if config['Default']['HNSELECTION_DRA'+str(i)]=="Not Listed" or config['Default']['HNSELECTION_DRA'+str(i)]=="Default":
             if daname_list[0]==hld_df["DRA"+str(i)+".Node"][0]:
                 dict_files["all_me_file"+str(i)]=all_me_files[i-1]
@@ -507,7 +506,6 @@ if __name__=='__main__':
                     logger.error("Site Name doesn't match for "+remote_sheet)
                 #verify_remote_interface(remote_df)
                 interface=get_interface(remote_df,hld_df)
-                logger.info(interface)
                 if verify_hld_interface(interface,hld_df)==True:
                     print("Interfaces inferred from the input file and generated as per the output matches with the output interfaces for "+remote_sheet)
                 else:

@@ -38,6 +38,7 @@ dict_files={}
 hn_dict={}
 dra_lport_list1=[]
 dra_lport_list2=[]
+mename_list=[]
 
 ###### Variable assignment from ini file ########
 HNSELECTION_DRA1=config['Default']['HNSELECTION_DRA1']
@@ -117,13 +118,18 @@ def verify_remote_interface(remote_df,remote_interface_list):
 def get_interface(remote_df,hld_df):
     interface_list=[]
     deconc_interface_list=[]
-    for remote_row in range(0,remote_df[remote_df.columns[0]].count()-1):
-        if (remote_df['Peer Name'][remote_row]==remote_df['Peer Name'][remote_row+1]) & (remote_df['FQDN'][remote_row]==remote_df['FQDN'][remote_row+1]) & (remote_df['Domain'][remote_row]==remote_df['Domain'][remote_row+1]):
-            interface_list=remote_df['Interface'].unique().tolist()
-            #if verify_linkset_group_with_interface(remote_df):
-            #what if the rows have different data , assert
-        else:
-            logger.error("Please check Peer Name, FQDN and Domain. The rows doesn't match")
+    if remote_df.shape[0]>1:
+        for remote_row in range(0,remote_df[remote_df.columns[0]].count()-1):
+            if (remote_df['Peer Name'][remote_row]==remote_df['Peer Name'][remote_row+1]) & (remote_df['FQDN'][remote_row]==remote_df['FQDN'][remote_row+1]) & (remote_df['Domain'][remote_row]==remote_df['Domain'][remote_row+1]):
+                interface_list=remote_df['Interface'].unique().tolist()
+                #if verify_linkset_group_with_interface(remote_df):
+                #what if the rows have different data , assert
+            else:
+                logger.error("Please check Peer Name, FQDN and Domain. The rows doesn't match")
+    else:
+        interface_list=remote_df['Interface'].unique().tolist()
+    interface_list=  [x.strip(' ') for x in interface_list]
+    logger.info(interface_list)
     for interface in interface_list:
         if ',' not in interface:
             deconc_interface_list.append(interface)
@@ -136,11 +142,14 @@ def get_interface(remote_df,hld_df):
     if (verify_remote_interface(remote_df,deconc_interface_list))==True:
         print("All the interfaces are verified for: "+remote_sheet)
         final_interface='&'.join(lookup_interface_list)
+        logger.info(final_interface)
         return final_interface
     else:
+        logger.info(lookup_interface_list)
         logger.error("Interfaces does not match from the lookup table")
 
 def verify_hld_interface(interface,hld_df):
+    logger.info(hld_df['RemoteNode.Interface'][0]==interface)
     return ((hld_df['RemoteNode.Interface'] == interface).all(axis=0))
 
 def verify_link_homing(remote_df):
@@ -162,18 +171,46 @@ def verify_link_homing(remote_df):
             logger.error("One or more missing values for Primary IP")
     return flag_for_multi_or_single_ip
 
+def get_dra_node_daname(file,string,list):
+    final_line=[]
+    mename_list=[]
+    with open(all_me_files[file-1],'r') as file1:  
+        for line in file1:
+            dict={}
+            if string in line:
+                final_line=line.split(',')
+                for value in final_line:
+                    name=value.split('=')
+                    dict[name[0]]=name[1].strip("\"\"")
+                mename_list.append(dict[string])
+                if config['Default']['HNSELECTION_DRA'+str(file)]=="Default":
+                    break
+    
+    if config['Default']['HNSELECTION_DRA'+str(file)]=="Not Listed":
+        if config['HN_NOT_LISTED_SECTION_DRA'+str(file)]['DANAME']==" ":
+           logger.error("Please provide DANAME for DRA"+str(file))
+           mename_list=[]
+        else:
+            if config['HN_NOT_LISTED_SECTION_DRA'+str(file)]['DANAME'] not in mename_list:
+                mename_list=[]
+                mename_list.append(config['HN_NOT_LISTED_SECTION_DRA'+str(file)]['DANAME'])
+            else:
+                logger.error("DANAME given should not be present in ALLME file for DRA"+str(file))
+    return mename_list
+
 def get_dra_node_mename(file,string):
     final_line=[]
     with open(file,'r') as file1:  
         for line in file1:
+            dict={}
             if string in line:
-                if 'METYPE=SPS' in line:
-                    final_line=line.split(',')
-        dict={}
+                final_line=line.split(',')
+                break
         for value in final_line:
             name=value.split('=')
             dict[name[0]]=name[1].strip("\"\"")
     return dict[string]
+
 
 def verify_dra_name_node(hld_df,dra_name_node,i):
     return (hld_df['DRA'+str(i)+".Node"]==dra_name_node).all(axis=0)
@@ -193,6 +230,7 @@ def get_host_domain(file,string,mename,string_hn_or_dn):
                     if (name[0]==string_hn_or_dn and dict[name[0]] not in hn_dn_list):
                         if hn_dict["HNSELECTION_DRA"+str(file)]=="Defined":
                             hn_dn_list.append(dict[name[0]])
+                            daname_list.append(dict["ADD DA:DANAME"])
                             continue
                         elif  hn_dict["HNSELECTION_DRA"+str(file)]=="Default":
                             if dict["ADD DA:DANAME"]==mename:
@@ -323,35 +361,42 @@ def verify_primary_secondary_ip(hld_df,file,ipversion,remote_df):
                             if  dict_ifm["ADD MODULE:MID"] not in ifmid_list:
                                 ifmid_list.append(dict_ifm["ADD MODULE:MID"])
                                 count+=1
-                if remote_df["Link Homing"][0]=="Single":
-                    break
-                elif count==2 and remote_df["Link Homing"][0]=="Multi":
-                    break  
+                                break
+                        if remote_df["Link Homing"][0]=="Single":
+                            break
+                        elif count==2 and remote_df["Link Homing"][0]=="Multi":
+                            break  
+            logger.info(ifmid_list)
             if len(ifmid_list)==0:
                 logger.error("No IFMMID found in ADD IPADDR section")
-            for ifmid in ifmid_list:
-                with open(dict_files["all_me_file"+str(file)],'r') as file1:
-                    for line in file1:
-                        if "ADD IPADDR:ADDRNAME" and "IPVER="+ipversion in line:
-                            if "IFMMID="+str(ifmid) in line:
-                                final_line=line.split(',')
-                                break
-                    for value in final_line:
-                        name=value.split('=')
-                        dict[name[0]]=name[1].strip("\"\"")
-                        if name[0]==ipversion+"1" and dict[name[0]] not in iplist:
-                            iplist.append(dict[name[0]])
-            if iplist[0]==hld_df['DRA'+str(file)+'.Primary IP'][i]:
-                if remote_df["Link Homing"][0]=="Multi":
-                    if iplist[1]==hld_df['DRA'+str(file)+'.Secondary IP'][i]:
-                        pass
-                    else:
-                        logger.error("Derived Secondary ip from file"+file+" doesn't match with the value in hld file")
-                else:
-                    pass
-            else:
-                logger.error("Derived Primary ip from file"+file+" doesn't match with the value in hld file")
                 flag=False
+                break
+            else:
+                for ifmid in ifmid_list:
+                    with open(dict_files["all_me_file"+str(file)],'r') as file1:
+                        for line in file1:
+                            if "ADD IPADDR:ADDRNAME" and "IPVER="+ipversion in line:
+                                if "IFMMID="+str(ifmid) in line:
+                                    final_line=line.split(',')
+                                    break
+                        for value in final_line:
+                            name=value.split('=')
+                            dict[name[0]]=name[1].strip("\"\"")
+                            if name[0]==ipversion+"1" and dict[name[0]] not in iplist:
+                                iplist.append(dict[name[0]])
+            logger.info(iplist)
+            if len(iplist)!=0:
+                if iplist[0]==hld_df['DRA'+str(file)+'.Primary IP'][i]:
+                    if remote_df["Link Homing"][0]=="Multi":
+                        if iplist[1]==hld_df['DRA'+str(file)+'.Secondary IP'][i]:
+                            pass
+                        else:
+                            logger.error("Derived Secondary ip from file"+file+" doesn't match with the value in hld file")
+                    else:
+                        pass
+                else:
+                    logger.error("Derived Primary ip from file"+file+" doesn't match with the value in hld file")
+                    flag=False
     return (flag)
 
 def verify_regport(hld_df,file,sheet):
@@ -425,11 +470,19 @@ if __name__=='__main__':
         logger.error("This is not Mated DRA, execution should have been stopped")
     hld_df=pd.DataFrame(pd.read_excel(hld_file_name,sheet_name=hld_file.sheet_names[0],engine='openpyxl'))
     for i in range(1,len(all_me_files)+1):
-        mename=get_dra_node_mename(all_me_files[i-1],"MENAME")
-        if mename==hld_df["DRA"+str(i)+".Node"][0]:
-            dict_files["all_me_file"+str(i)]=all_me_files[i-1]
-        else:
-            logger.error("Mename from ALLME file doesn't match with DRA"+str(i)+" Node")
+        daname_list=get_dra_node_daname(i,"ADD DA:DANAME",mename_list)
+        logger.info(daname_list)
+        if config['Default']['HNSELECTION_DRA'+str(i)]=="Not Listed" or config['Default']['HNSELECTION_DRA'+str(i)]=="Default":
+            if daname_list[0]==hld_df["DRA"+str(i)+".Node"][0]:
+                dict_files["all_me_file"+str(i)]=all_me_files[i-1]
+            else:
+                logger.error("Mename from ALLME file doesn't match with DRA"+str(i)+" Node")
+        elif config['Default']['HNSELECTION_DRA'+str(i)]=="Defined":
+            if hld_df["DRA"+str(i)+".Node"][0] in daname_list:
+                dict_files["all_me_file"+str(i)]=all_me_files[i-1]
+            else:
+                logger.error("DANAME present should be from ALLME file for DRA"+str(i))
+
         
     cpu_df=pd.DataFrame(cpu_file)
     size={}
@@ -454,7 +507,7 @@ if __name__=='__main__':
                     logger.error("Site Name doesn't match for "+remote_sheet)
                 #verify_remote_interface(remote_df)
                 interface=get_interface(remote_df,hld_df)
-
+                logger.info(interface)
                 if verify_hld_interface(interface,hld_df)==True:
                     print("Interfaces inferred from the input file and generated as per the output matches with the output interfaces for "+remote_sheet)
                 else:
@@ -478,7 +531,7 @@ if __name__=='__main__':
                             logger.error("Secondary IP doesn't match for "+remote_sheet)
 
                 for i in range(1,len(dict_files)+1):
-                    if verify_dra_name_node(hld_df,dra_dict["dra"+str(i)+"_node"],i):
+                    if verify_dra_name_node(hld_df,hld_df["DRA"+str(i)+".Node"][0],i):
                         print("DRA"+str(i)+" NAME NODE for all rows matches with the value found in the "+hld_sheet)
                     else:
                         logger.error("DRA"+str(i)+" NAME NODE doesn't match with the value found in the "+hld_sheet)

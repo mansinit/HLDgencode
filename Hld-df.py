@@ -286,7 +286,7 @@ def verify_linkset_name(remote_df,hld_df,file,remote_sheet):
             i=new_link
         return flag 
 
-def getipv4_from_allmefile(string,file):
+def getipv4_from_allmefile(string,file,mid_list):
     dict={}
     iplist=[]
     final_line=[]
@@ -299,9 +299,26 @@ def getipv4_from_allmefile(string,file):
                 dict[name[0]]=name[1].strip("\"\"")
                 if name[0]=="IPV41" and dict[name[0]] not in iplist:
                     iplist.append(dict[name[0]])
+    if file==1:
+        file+=1
+    else:
+        file-=1
+    list_dict_ip={}
+    dict_lnkname={}
+    with open(dict_files["all_me_file"+str(file)],'r') as file1:
+        for line in file1:
+            for ip in iplist:
+                if "ADD DMLNK:LNKNAME" in line:
+                    if ip in line:
+                        final_line=line.split(',')
+                        for value in final_line:
+                            name=value.split('=')
+                            dict_lnkname[name[0]]=name[1].strip("\"\"")
+                        list_dict_ip[dict_lnkname["MID"]]=ip
+    return list_dict_ip
 
 def get_mid(cpu_df,file,node_name):
-    mid_list=[]
+    new_midlist=[]
     new_cpu_df=pd.to_datetime(cpu_df["result_time"])
     cpu_df=cpu_df[(cpu_df["ne_name"]==node_name)]
     cpu_df=cpu_df[new_cpu_df.dt.strftime('%H:%M:%S').between('06:00:00','23:00:00')]
@@ -312,12 +329,18 @@ def get_mid(cpu_df,file,node_name):
     cpu_df=cpu_df.sort_values(by = ['peak_cpu_usage','module'])
     cpu_df['new_module']=(cpu_df['module'].str.extract('(\d+)'))
     midlist= (cpu_df['new_module'].tolist())
+    if EXCLUDE_C_LINK_MODULE=="YES":
+        dict_iplist=getipv4_from_allmefile("ADD IPADDR",file,midlist)
+        for mid in midlist:
+            if mid in dict_iplist.keys():
+                pass
+            else:
+                new_midlist.append(mid)
+        return new_midlist
     return midlist
 
 def verify_mid(hld_df,file,mid_list,sheet):
-    if EXCLUDE_C_LINK_MODULE=="YES":
-        getipv4_from_allmefile("ADD IPADDR",file)
-    else:
+    
         if len(mid_list)==0:
             logger.error("Check for the cpu threshold value")
         elif len(mid_list)<hld_df.shape[0]:
@@ -404,7 +427,6 @@ def verify_regport(hld_df,file,sheet):
                 logger.error("Registered Port should be empty when regportflag is No for DRA"+str(file)+" in "+sheet)
                 return False
         else:
-            logger.error("Registered Port Flag should be No for all rows in DRA"+str(file))
             flag=False
     else:
         regport=int(config['REGPORT_SECTION']['REGPORT'])
@@ -416,7 +438,6 @@ def verify_regport(hld_df,file,sheet):
                         logger.error("Assigned Registered Port value should not be present in ALLME file for DRA"+str(file)+" in "+sheet)
                         return False
         else:
-            logger.error("Registered Port Flag should be Yes for all rows in DRA"+str(file))
             flag=False
     if flag==False:
         logger.error("Registered Port Flag should be "+hld_df["DRA"+str(file)+".RegPortFlag"][0]+" for DRA"+str(file)+" in "+sheet)
@@ -469,20 +490,22 @@ if __name__=='__main__':
     else:
         logger.error("This is not Mated DRA, execution should have been stopped")
     hld_df=pd.DataFrame(pd.read_excel(hld_file_name,sheet_name=hld_file.sheet_names[0],engine='openpyxl'))
+
+    daname_node={}
     for i in range(1,len(all_me_files)+1):
         daname_list=get_dra_node_daname(i,"ADD DA:DANAME",mename_list)
         if config['Default']['HNSELECTION_DRA'+str(i)]=="Not Listed" or config['Default']['HNSELECTION_DRA'+str(i)]=="Default":
             if daname_list[0]==hld_df["DRA"+str(i)+".Node"][0]:
+                daname_node[i]=daname_list[0]
                 dict_files["all_me_file"+str(i)]=all_me_files[i-1]
             else:
                 logger.error("Mename from ALLME file doesn't match with DRA"+str(i)+" Node")
         elif config['Default']['HNSELECTION_DRA'+str(i)]=="Defined":
             if hld_df["DRA"+str(i)+".Node"][0] in daname_list:
+                daname_node[i]=hld_df["DRA"+str(i)+".Node"][0]
                 dict_files["all_me_file"+str(i)]=all_me_files[i-1]
             else:
                 logger.error("DANAME present should be from ALLME file for DRA"+str(i))
-
-        
     cpu_df=pd.DataFrame(cpu_file)
     size={}
     hn_col_name=["Host Name","Domain"]
@@ -529,7 +552,7 @@ if __name__=='__main__':
                             logger.error("Secondary IP doesn't match for "+remote_sheet)
 
                 for i in range(1,len(dict_files)+1):
-                    if verify_dra_name_node(hld_df,hld_df["DRA"+str(i)+".Node"][0],i):
+                    if verify_dra_name_node(hld_df,daname_node[i],i):
                         print("DRA"+str(i)+" NAME NODE for all rows matches with the value found in the "+hld_sheet)
                     else:
                         logger.error("DRA"+str(i)+" NAME NODE doesn't match with the value found in the "+hld_sheet)

@@ -1,3 +1,4 @@
+import math
 import os
 import re
 import pandas as pd
@@ -7,6 +8,7 @@ import glob
 import configparser
 # importing module
 import logging
+cwd = os.getcwd()
 # Create and configure logger
 logging.basicConfig(filename="newfile.log",
                     format='%(asctime)s %(message)s',
@@ -22,10 +24,10 @@ config.sections()
 config.read('input_variables.ini')
 
 ####### Find Files Section ########
-hld_file=glob.glob('C:\\Users\\mdhingra\\RobotFrameworkProjects\\Bharti MANO\\hld\\Testdata\\HLD*.xlsx')
+hld_file=glob.glob(cwd+'\\Testdata\\HLD*.xlsx')
 cpu_file_name='Testdata/CPUUsageMeasurement.csv'
 remote_file_name='Testdata/Remote_Node_Details.xlsx'
-all_me_files=glob.glob('C:\\Users\\mdhingra\\RobotFrameworkProjects\\Bharti MANO\\hld\\Testdata\\ALLME_*.txt')
+all_me_files=glob.glob(cwd+'\\Testdata\\ALLME_*.txt')
 
 ###### Read Files Section #########
 hld_file_name=hld_file[0]
@@ -96,54 +98,86 @@ def verify_remote_hld_column(remote_df,hld_df,col_name):
     if col_name=="Node Role":
         return ((remote_df['Node Role'] == hld_df['RemoteNode.NodeRole']).all(axis=0))
 
-def verify_linkset_group_with_interface(remote_df):
-    
-    for remote_row in range(0,remote_df[remote_df.columns[0]].count()-1):
-        count=0
+def verify_linkset_group_with_interface(remote_df,sheet):
+    flagj=True
+    flagk=True
+    if remote_df.shape[0]==1:
+        return flagj,flagk
+    remote_row=1
+    for i in range(0,remote_df.shape[0],remote_row):
+        countj=0
+        countk=0
+        no_of_links=remote_df["Number of Links"][i]
+        j=i
+        if math.isnan(no_of_links):
+            continue
+        while j<remote_df.shape[0]-1 and remote_df["LinkSet Group"][j]==remote_df["LinkSet Group"][j+1] :
+            countj+=1
+            j+=1
+        k=i
+        countj=countj+1
+        while k<remote_df.shape[0]-1 and remote_df["Interface"][k]==remote_df["Interface"][k+1] :
+            countk+=1
+            k+=1
+        remote_row=no_of_links
         i=remote_row
-        while remote_df['LinkSet Group'][remote_row]==remote_df['LinkSet Group'][remote_row+1]:
-            count += 1
-        while i<count:
-            if remote_df['Interface'][i]==remote_df['Interface'][i+1]:
-                pass
-            else:
-                raise(Exception)
+        countk=countk+1
+        if countj==no_of_links:
+            pass
         else:
-            raise(Exception)
+            if countj<no_of_links:
+                flagj=False
+                pass
+            elif countj > no_of_links:
+                logger.error("Please check number of links for row "+str(countj)+" as link set group is same for "+str(no_of_links)+" rows in "+str(sheet))
+
+                flagj= False   
+        if countk==no_of_links:
+            pass
+        else:
+            if countk<no_of_links:
+                logger.error("Interfaces should be same for "+ str(int(no_of_links))+" rows in "+str(sheet))
+                flagk= False
+            else:
+                flagk= False 
+    return flagj,flagk
 
 def verify_remote_interface(remote_df,remote_interface_list):
     interface_list=["S6a","Cx", "Sh" ,"Gx" ,"Rx" ,"Gy" ,"S6b" ,"SWx" ,"SWm" ,"S13" ,"SLg" ,"SLh"]
     return all(item in interface_list for item in remote_interface_list)
 
-def get_interface(remote_df,hld_df):
-    interface_list=[]
-    deconc_interface_list=[]
-    if remote_df.shape[0]>1:
-        for remote_row in range(0,remote_df[remote_df.columns[0]].count()-1):
-            if (remote_df['Peer Name'][remote_row]==remote_df['Peer Name'][remote_row+1]) & (remote_df['FQDN'][remote_row]==remote_df['FQDN'][remote_row+1]) & (remote_df['Domain'][remote_row]==remote_df['Domain'][remote_row+1]):
-                interface_list=remote_df['Interface'].unique().tolist()
-                #if verify_linkset_group_with_interface(remote_df):
-                #what if the rows have different data , assert
-            else:
-                logger.error("Please check Peer Name, FQDN and Domain. The rows doesn't match")
-    else:
-        interface_list=remote_df['Interface'].unique().tolist()
-    interface_list=  [x.strip(' ') for x in interface_list]
-    for interface in interface_list:
-        if ',' not in interface:
-            deconc_interface_list.append(interface)
+
+def get_interface(remote_df,hld_df,sheet):
+        interface_list=[]
+        deconc_interface_list=[]
+        #check interface if it is false or true
+        #if it is true, all the interfaces rows should match
+        # if it is false, and if it differs throw error
+        if remote_df.shape[0]>1:
+            for remote_row in range(0,remote_df[remote_df.columns[0]].count()-1):
+                if (remote_df['Peer Name'][remote_row]==remote_df['Peer Name'][remote_row+1]) & (remote_df['FQDN'][remote_row]==remote_df['FQDN'][remote_row+1]) & (remote_df['Domain'][remote_row]==remote_df['Domain'][remote_row+1]):
+                    interface_list=remote_df['Interface'].unique().tolist()
+                else:
+                    logger.error("Please check Peer Name, FQDN and Domain. The rows doesn't match")
         else:
-            for deconc_interface in interface.split(','):
-                if deconc_interface not in deconc_interface_list:
-                    deconc_interface_list.append(deconc_interface)
-                #if interface.split(',') not in list 
-    lookup_interface_list= [(interface_dict[interface])+"-1" if interface in interface_dict.keys() else (interface)+"-1" for interface in deconc_interface_list]
-    if (verify_remote_interface(remote_df,deconc_interface_list))==True:
-        print("All the interfaces are verified for: "+remote_sheet)
-        final_interface='&'.join(lookup_interface_list)
-        return final_interface
-    else:
-        logger.error("Interfaces does not match from the lookup table")
+            interface_list=remote_df['Interface'].unique().tolist()
+        interface_list=  [x.strip(' ') for x in interface_list]
+        for interface in interface_list:
+            if ',' not in interface:
+                deconc_interface_list.append(interface)
+            else:
+                for deconc_interface in interface.split(','):
+                    if deconc_interface not in deconc_interface_list:
+                        deconc_interface_list.append(deconc_interface)
+                    #if interface.split(',') not in list 
+        lookup_interface_list= [(interface_dict[interface])+"-1" if interface in interface_dict.keys() else (interface)+"-1" for interface in deconc_interface_list]
+        if (verify_remote_interface(remote_df,deconc_interface_list))==True:
+            print("All the interfaces are verified for: "+remote_sheet)
+            final_interface='&'.join(lookup_interface_list)
+            return final_interface
+        else:
+            logger.error("Interfaces does not match from the lookup table")
+ 
 
 def verify_hld_interface(interface,hld_df):
     return ((hld_df['RemoteNode.Interface'] == interface).all(axis=0))
@@ -274,6 +308,7 @@ def verify_linkset_name(remote_df,hld_df,file,remote_sheet):
                     link_name=linkset_name+"_"+f"{row:02}"
                 if hld_df["DRA"+str(file)+".LinkSet Name"][row]==linkset_name :
                     pass
+                
                 else:
                     logger.error("Link Set Name is not correct for "+str(row+1)+" DRA"+str(file)+" in "+remote_sheet)
                     flag=False
@@ -350,7 +385,7 @@ def verify_mid(hld_df,file,mid_list,sheet):
                 logger.error("DRA"+str(file)+" "+"MID doesn't match with the value inferred from CPU file for "+sheet)      
         return ((hld_df["DRA"+str(file)+".MID"]).isin(mid_list[0:hld_df.shape[0]])).all(axis=0)
 
-def verify_primary_secondary_ip(hld_df,file,ipversion,remote_df):
+def verify_primary_secondary_ip(hld_df,file,ipversion,remote_df,sheet):
     flag=True
     for i in range(0,hld_df.shape[0]):
         iplist=[]
@@ -410,7 +445,13 @@ def verify_primary_secondary_ip(hld_df,file,ipversion,remote_df):
                         else:
                             logger.error("Derived Secondary ip for DRA"+str(file)+" doesn't match with the value in hld file")
                     else:
-                        pass
+                        if remote_df["Link Homing"][0]=="Single":
+                            if math.isnan(hld_df['DRA'+str(file)+'.Secondary IP'][i]):
+                                pass
+                            else:
+                                logger.error("Error : For Single Homing, only Primary IP to be entered in input data for "+sheet)
+                elif math.isnan(hld_df['DRA'+str(file)+'.Primary IP'][i]) or math.isnan(hld_df['DRA'+str(file)+'.Secondary IP'][i]):
+                    logger.error("Error : For Multi Homing, both Primary IP and Secondary IP to be entered in input data for "+sheet)
                 else:
                     logger.error("Derived Primary ip for DRA"+str(file)+" doesn't match with the value in hld file")
                     flag=False
@@ -482,6 +523,33 @@ def get_lport_list(file):
                         lport_list.append(name[1])
     return lport_list
 
+def verify_numberoflinks_from_linkset_interface(remote_df,sheet,string):
+    if remote_df.shape[0]==1 and remote_df["Number of Links"][0]==1:
+        return True
+    remote_row=1
+    flag=True
+    for i in range(0,remote_df.shape[0],remote_row):
+        countj=0
+        no_of_links=remote_df["Number of Links"][i]
+        j=i
+        if math.isnan(no_of_links):
+            continue
+        while j<remote_df.shape[0]-1 and remote_df[string][j]==remote_df[string][j+1] :
+            countj+=1
+            j+=1
+        countj=countj+1
+        if countj==no_of_links:
+            pass
+        else:
+            if countj<no_of_links:
+                logger.error("Please check the "+string+" should be same for the number of links rows "+sheet)
+                flag=False
+                pass
+            elif countj > no_of_links:
+                logger.error("Please check number of links for row "+str(int(no_of_links))+" as "+string+" is same for "+str(countj)+" rows in "+str(sheet))
+                flag= False
+    return flag
+
     
 if __name__=='__main__':
     dra_dict={}
@@ -528,12 +596,15 @@ if __name__=='__main__':
                 else:
                     logger.error("Site Name doesn't match for "+remote_sheet)
                 #verify_remote_interface(remote_df)
-                interface=get_interface(remote_df,hld_df)
-                if verify_hld_interface(interface,hld_df)==True:
-                    print("Interfaces inferred from the input file and generated as per the output matches with the output interfaces for "+remote_sheet)
-                else:
-                    logger.error("Interface inferred doesn't match for "+remote_sheet)
-
+                if verify_numberoflinks_from_linkset_interface(remote_df,remote_sheet,"Interface"):
+                    interface=get_interface(remote_df,hld_df,remote_sheet)
+                    if len(interface)!=0:
+                        if verify_hld_interface(interface,hld_df)==True:
+                            print("Interfaces inferred from the input file and generated as per the output matches with the output interfaces for "+remote_sheet)
+                        else:
+                            logger.error("Interface inferred doesn't match for "+remote_sheet)
+                    else:
+                        logger.error("Please check interface")
                 for col_name in col_names:
                     if verify_remote_hld_column(remote_df,hld_df,col_name):
                         print(col_name+" for all rows matches in input and output for "+remote_sheet)
@@ -568,15 +639,16 @@ if __name__=='__main__':
                             logger.error("DRA"+str(i)+" "+str(name)+" doesn't match with the value found in the "+hld_sheet)
                         
                     
-                    if (verify_linkset_name(remote_df,hld_df,i,remote_sheet)):
-                        print("DRA"+str(i)+" LinkSet Name for all rows matches with the value inferred for "+hld_sheet)
-                        print("DRA"+str(i)+" Link Name for all rows matches with the value inferred for "+hld_sheet)
-                    
+                    if verify_numberoflinks_from_linkset_interface(remote_df,remote_sheet,"LinkSet Group"):
+                        if (verify_linkset_name(remote_df,hld_df,i,remote_sheet)):
+                            print("DRA"+str(i)+" LinkSet Name for all rows matches with the value inferred for "+hld_sheet)
+                            print("DRA"+str(i)+" Link Name for all rows matches with the value inferred for "+hld_sheet)
+                        
                     if len(dra_dict["dra"+str(i)+"_mid"])!=0:
                         if verify_mid(hld_df,i,dra_dict["dra"+str(i)+"_mid"],hld_sheet):
                             print("DRA"+str(i)+" MID for all rows matches with the value inferred from CPU file for "+hld_sheet)
                 
-                    if verify_primary_secondary_ip(hld_df,i,hld_df["RemoteNode.IPv4/IPv6"][0],remote_df):
+                    if verify_primary_secondary_ip(hld_df,i,hld_df["RemoteNode.IPv4/IPv6"][0],remote_df,hld_sheet):
                         print("DRA"+str(i)+" Primary/Secondary IP for all rows matches with the value inferred from ALLME file for "+hld_sheet)
                     else:
                         logger.error("DRA"+str(i)+" "+"Primary/Secondary IP  doesn't match with the value inferred from ALLME file for "+hld_sheet)
@@ -587,7 +659,7 @@ if __name__=='__main__':
                     if verify_lport(hld_df,i,dra_dict["dra"+str(i)+"_lport"],hld_sheet):
                         print("DRA"+str(i)+" LPORT column has been verified for "+hld_sheet)
                 print("*****************************************"+hld_sheet+" columns verified ******************************************")
-
+            
 
 if os.stat("newfile.log").st_size!=0:
     print("***************Check the log file for errors*******************")

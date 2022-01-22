@@ -550,7 +550,112 @@ def verify_numberoflinks_from_linkset_interface(remote_df,sheet,string):
                 flag= False
     return flag
 
-    
+def compare_dictionary_values(peer_dict):
+    res=True
+    count=0
+    compare_list=[]
+    for i in ((peer_dict.keys())):
+        if count==0:
+            compare_list=peer_dict[i]
+            count+=1
+            continue
+        if compare_list!=peer_dict[i]:
+            res=False
+            break
+    return res
+
+def check_interface_peer_same(remote_df,sheet):
+    peer_dict={}
+    interface_list=[]
+    for i in range(remote_df.shape[0]):
+        #if remote_df["Peer Name"][i] not in dict.keys()
+        if remote_df["Peer Name"][i] not in peer_dict.keys():
+                interface_list=[]
+                interface_list.append(remote_df["Interface"][i])
+                peer_dict[remote_df["Peer Name"][i]]=interface_list
+        else:
+                peer_dict[remote_df["Peer Name"][i]].append(remote_df["Interface"][i])
+    return compare_dictionary_values(peer_dict)
+
+def check_all_for_interface_peer_linksetgroup(remote_df,sheet):
+    peer_interface_dict={}
+    peer_interface_link_dict={}
+    for i in range(remote_df.shape[0]):
+        no_of_links=remote_df["Number of Links"][i]
+        if math.isnan(no_of_links):
+            continue
+        if no_of_links==1:
+            list=[]
+            cols=["Number of Links", "Protocol", "Link Homing", "Primary IP", "Secondary IP", "LinkSet Group" ]
+            for col in cols:
+                list.append(remote_df[col][i])
+            peer_interface_dict[(remote_df["Peer Name"][i],remote_df["Interface"][i])]=list
+        else:
+            list=[]
+            cols=["Protocol", "Link Homing", "Primary IP", "Secondary IP"]
+            for col in cols:
+                list.append(remote_df[col][i])
+            
+            peer_interface_link_dict[(remote_df["Peer Name"][i],remote_df["Interface"][i], remote_df["LinkSet Group"][i])]=list
+    return True
+
+def get_iptype_linkset_group_for_ip(remote_df,sheet):
+    """ For the first Peer, if there are multiple distinct LinkSet Group present then check if respective
+        Primary IP and Secondary IP for the first LinkSet Group, is same as that of the other LinkSet Groups 
+        within the same peer. If there is more than a single row present for a LinkSet Group, then only the
+        first row to be considered for comparison.
+        If it’s same, map : SHEET<i>_REMOTE_IP_TYPE=‘SAME’ 
+        Else, map : SHEET<i>_REMOTE_IP_TYPE=‘UNIQUE’
+    """
+    REMOTE_IP_TYPE="SAME"
+    peer=remote_df["Peer Name"][0]
+    link_list=remote_df[remote_df["Peer Name"]==peer]["LinkSet Group"].unique().tolist()
+    count_peer=remote_df["Peer Name"].value_counts()[peer]
+    if len(link_list)>1:
+        primary_list=remote_df[remote_df["Peer Name"]==peer]["Primary IP"].unique().tolist()
+        secondary_list=remote_df[remote_df["Peer Name"]==peer]["Secondary IP"].unique().tolist()
+        if len(primary_list)==len(secondary_list) and len(primary_list)==1:
+            REMOTE_IP_TYPE="SAME"
+        else:
+            REMOTE_IP_TYPE="UNIQUE"
+
+    return REMOTE_IP_TYPE
+
+def infer_mid_set_for_same(hld_df,mid_list,sheet):
+    pass
+
+def check_for_same(remote_df,sheet):
+    no_of_peer_name=len(remote_df["Peer Name"].unique().tolist())
+    peer_list=remote_df["Peer Name"].unique().tolist()
+    if no_of_peer_name<1:
+        logger.error("More than 1 Peer Name should be present Error : Improper Data for "+sheet)
+        return False
+    else:
+        #check for interfaces--all peer names should have same set of interfaces
+        if (check_interface_peer_same(remote_df,sheet)):
+            for row in range(remote_df.shape[0]-2):
+                #check for interfaces to be present number of links times
+                count=0
+                no_of_links=remote_df["Number of Links"][row]
+                if math.isnan(no_of_links) or no_of_links==1:
+                    continue
+
+                while count<no_of_links-1 and remote_df["Interface"][row]==remote_df["Interface"][row+1] :
+                    count+=1
+                    row+=1
+                count+=1
+                if count==no_of_links:
+                    pass
+                else:
+                    logger.error("All the number of links should have same interface for a particular peer name in row "+ str(row) + " in "+sheet)
+        else:
+            
+            logger.error("All the peer names should have same set of interfaces for "+sheet)
+            return False
+        if check_all_for_interface_peer_linksetgroup(remote_df,sheet):
+            return True
+    return True
+
 if __name__=='__main__':
     dra_dict={}
     if (verify_mated_pair(all_me_files,'MDA-1'))==True:
@@ -585,6 +690,7 @@ if __name__=='__main__':
             dra_dict["dra"+str(i)+"_mid"]=get_mid(cpu_df,i,dra_dict["dra"+str(i)+"_node"])
             dra_dict["dra"+str(i)+"_lport"]=get_lport_list(i)
         col_names=["Peer Name","FQDN","Domain","Protocol","IP version","Local Port","Node Role"]
+        logger.info(dra_dict)
         for remote_sheet,hld_sheet in zip(remote_file.sheet_names,hld_file.sheet_names):
             remote_df=pd.DataFrame(pd.read_excel(remote_file_name,sheet_name=remote_sheet,engine='openpyxl'))
             hld_df=pd.DataFrame(pd.read_excel(hld_file_name,sheet_name=hld_sheet,engine='openpyxl'))
@@ -659,7 +765,17 @@ if __name__=='__main__':
                     if verify_lport(hld_df,i,dra_dict["dra"+str(i)+"_lport"],hld_sheet):
                         print("DRA"+str(i)+" LPORT column has been verified for "+hld_sheet)
                 print("*****************************************"+hld_sheet+" columns verified ******************************************")
-            
+            elif DRA_IP_TYPE=="Same":
+                if (check_for_same(remote_df,remote_sheet)):
+                    print("All the checks for peer name, interface, linkset group and number of links has been verified for "+remote_sheet)
+                if (get_iptype_linkset_group_for_ip(remote_df,remote_sheet))=="SAME":
+                    #same set of immid set will be used in ascending order
+                    infer_mid_set_for_same(hld_df,i,dra_dict["dra"+str(i)+"_mid"],hld_sheet)
+                else:
+                    pass
+                    # if it is unique it will be same as the usual different case but still need to reuse the mids 
+                    #according to the linkset group and peer names and number of links
+
 
 if os.stat("newfile.log").st_size!=0:
     print("***************Check the log file for errors*******************")

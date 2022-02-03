@@ -1,6 +1,7 @@
 import math
 import os
 import re
+from turtle import st
 import pandas as pd
 import numpy as np
 from pandas.core.reshape.concat import concat
@@ -41,6 +42,7 @@ hn_dict={}
 dra_lport_list1=[]
 dra_lport_list2=[]
 mename_list=[]
+new_cpu_df={}
 
 ###### Variable assignment from ini file ########
 HNSELECTION_DRA1=config['Default']['HNSELECTION_DRA1']
@@ -147,18 +149,22 @@ def verify_remote_interface(remote_df,remote_interface_list):
     return all(item in interface_list for item in remote_interface_list)
 
 
-def get_interface(remote_df,hld_df,sheet):
+def get_interface(remote_df,hld_df,sheet,dra_ip_type):
         interface_list=[]
         deconc_interface_list=[]
+        final_interface=""
         #check interface if it is false or true
         #if it is true, all the interfaces rows should match
         # if it is false, and if it differs throw error
         if remote_df.shape[0]>1:
             for remote_row in range(0,remote_df[remote_df.columns[0]].count()-1):
-                if (remote_df['Peer Name'][remote_row]==remote_df['Peer Name'][remote_row+1]) & (remote_df['FQDN'][remote_row]==remote_df['FQDN'][remote_row+1]) & (remote_df['Domain'][remote_row]==remote_df['Domain'][remote_row+1]):
-                    interface_list=remote_df['Interface'].unique().tolist()
+                if dra_ip_type=="Different":
+                    if (remote_df['Peer Name'][remote_row]==remote_df['Peer Name'][remote_row+1]) & (remote_df['FQDN'][remote_row]==remote_df['FQDN'][remote_row+1]) & (remote_df['Domain'][remote_row]==remote_df['Domain'][remote_row+1]):
+                        interface_list=remote_df['Interface'].unique().tolist()
+                    else:
+                        logger.error("Please check Peer Name, FQDN and Domain. The rows doesn't match")
                 else:
-                    logger.error("Please check Peer Name, FQDN and Domain. The rows doesn't match")
+                    interface_list=remote_df['Interface'].unique().tolist()
         else:
             interface_list=remote_df['Interface'].unique().tolist()
         interface_list=  [x.strip(' ') for x in interface_list]
@@ -167,17 +173,17 @@ def get_interface(remote_df,hld_df,sheet):
                 deconc_interface_list.append(interface)
             else:
                 for deconc_interface in interface.split(','):
-                    if deconc_interface not in deconc_interface_list:
+                    if deconc_interface not in deconc_interface_list and deconc_interface not in interface_list:
                         deconc_interface_list.append(deconc_interface)
-                    #if interface.split(',') not in list 
         lookup_interface_list= [(interface_dict[interface])+"-1" if interface in interface_dict.keys() else (interface)+"-1" for interface in deconc_interface_list]
         if (verify_remote_interface(remote_df,deconc_interface_list))==True:
             print("All the interfaces are verified for: "+remote_sheet)
             final_interface='&'.join(lookup_interface_list)
-            return final_interface
         else:
             logger.error("Interfaces does not match from the lookup table")
- 
+        
+        return final_interface
+
 
 def verify_hld_interface(interface,hld_df):
     return ((hld_df['RemoteNode.Interface'] == interface).all(axis=0))
@@ -288,7 +294,6 @@ def verify_host_domain(hld_df,list,i,string):
 
 def verify_linkset_name(remote_df,hld_df,file,remote_sheet):
     #for remote_row in range(0,(remote_df[remote_df.columns[0]].count())-1):
-    #print(remote_df["Number of Links"][remote_row])
         i=0
         flag=True
         new_remote_df=remote_df.loc[remote_df["Number of Links"].notnull()]
@@ -306,9 +311,8 @@ def verify_linkset_name(remote_df,hld_df,file,remote_sheet):
                     link_name=linkset_name+"_"+f"{row-i:02}"
                 else:
                     link_name=linkset_name+"_"+f"{row:02}"
-                if hld_df["DRA"+str(file)+".LinkSet Name"][row]==linkset_name :
+                if hld_df["DRA"+str(file)+".LinkSet Name"][row]==linkset_name.strip() :
                     pass
-                
                 else:
                     logger.error("Link Set Name is not correct for "+str(row+1)+" DRA"+str(file)+" in "+remote_sheet)
                     flag=False
@@ -352,7 +356,7 @@ def getipv4_from_allmefile(string,file,mid_list):
                         list_dict_ip[dict_lnkname["MID"]]=ip
     return list_dict_ip
 
-def get_mid(cpu_df,file,node_name):
+def get_mid(cpu_df,file,node_name,new_cpu_df):
     new_midlist=[]
     new_cpu_df=pd.to_datetime(cpu_df["result_time"])
     cpu_df=cpu_df[(cpu_df["ne_name"]==node_name)]
@@ -364,18 +368,22 @@ def get_mid(cpu_df,file,node_name):
     cpu_df=cpu_df.sort_values(by = ['peak_cpu_usage','module'])
     cpu_df['new_module']=(cpu_df['module'].str.extract('(\d+)'))
     midlist= (cpu_df['new_module'].tolist())
-    if EXCLUDE_C_LINK_MODULE=="YES":
+    new_cpu_df_selected_cols=cpu_df[['new_module',"peak_cpu_usage"]]
+    new_cpu_df["new_cpu_df"+str(file)]=new_cpu_df_selected_cols.copy()
+    if EXCLUDE_C_LINK_MODULE=="YES" or EXCLUDE_C_LINK_MODULE=="Yes":
         dict_iplist=getipv4_from_allmefile("ADD IPADDR",file,midlist)
         for mid in midlist:
             if mid in dict_iplist.keys():
                 pass
             else:
                 new_midlist.append(mid)
-        return new_midlist
-    return midlist
+        return new_midlist,new_cpu_df
+    return midlist,new_cpu_df
+
+
 
 def verify_mid(hld_df,file,mid_list,sheet):
-    
+        
         if len(mid_list)==0:
             logger.error("Check for the cpu threshold value")
         elif len(mid_list)<hld_df.shape[0]:
@@ -383,16 +391,61 @@ def verify_mid(hld_df,file,mid_list,sheet):
         else:
             if ((hld_df["DRA"+str(file)+".MID"]).isin(mid_list[0:hld_df.shape[0]])).all(axis=0)==False:
                 logger.error("DRA"+str(file)+" "+"MID doesn't match with the value inferred from CPU file for "+sheet)      
-        return ((hld_df["DRA"+str(file)+".MID"]).isin(mid_list[0:hld_df.shape[0]])).all(axis=0)
+        #logger.info(((hld_df["DRA"+str(file)+".MID"]).isin(mid_list[0:hld_df.shape[0]])).all(axis=0))
+        hld_mid=(hld_df["DRA"+str(file)+".MID"]).tolist()
+        derived_mids=mid_list[0:hld_df.shape[0]]
+        derived_mids=(list(map(int,derived_mids)))
+        return hld_mid==derived_mids
 
-def verify_primary_secondary_ip(hld_df,file,ipversion,remote_df,sheet):
-    flag=True
-    for i in range(0,hld_df.shape[0]):
-        iplist=[]
-        count=0
-        final_line=[]
-        dict={}
-        current_mid=hld_df["DRA"+str(file)+".MID"][i]
+def verify_mid_same(hld_df,file,mid_list,remote_ip_type,new_cpu_df,sheet,remote_df):
+    #if it is unique-- need ifmmids with its mids and peakcpuusage associated with it.
+    # should create a dictionary 751:[(501,19),[502,20])
+    #then loop over them to take average of cpu usage and find the maximum no of modules first
+    # and then the average of that many peakcpu values--- keep doing this if it's unique
+    #if it is same -- only one set which was the maximum one will be considered
+    #with the lowest cpu usage will be considered and all of the mids from that set will be assigned
+    link_list=remote_df["LinkSet Group"].unique().tolist()
+    new_cpu_df=find_ifmmid_set(hld_df,file,mid_list,new_cpu_df)
+    new_cpu_df=new_cpu_df.dropna()
+    new_cpu_df=new_cpu_df.reset_index()
+    if remote_ip_type=="SAME":
+        selected_cols=new_cpu_df["ifmmid1"]
+        if "ifmmid2" in new_cpu_df:
+            new_cpu_df["ifmmid"]=new_cpu_df["ifmmid1"].astype(str)+","+new_cpu_df["ifmmid2"].astype(str)
+        else:
+            new_cpu_df["ifmmid"]=selected_cols.copy()
+        #max_bsg_ifmmid_id=new_cpu_df["ifmmid"].mode()
+        new_cpu_df.drop(["index","ifmmid1"],axis='columns',inplace=True)
+        mid_list=new_cpu_df[new_cpu_df["ifmmid"]==new_cpu_df["ifmmid"].loc[0]]["new_module"]
+        """mean_list={}
+        for ifmmid in max_bsg_ifmmid_id:
+            mean_list[ifmmid]=(new_cpu_df[new_cpu_df["ifmmid"]==ifmmid]["peak_cpu_usage"].mean())
+        link_list=remote_df["LinkSet Group"].unique().tolist()
+        #now we have linkset group list which tells us how many unique groups we have
+        #that many mids we are going to pick from the set, if they are not sufficient 
+        # after completing one set we will repeat that
+        ifmmid=list(mean_list.keys())[list(mean_list.values()).index(min(mean_list.values()))]
+        mid_list=(new_cpu_df[new_cpu_df["ifmmid"]==ifmmid]["new_module"]).tolist()
+        mid_list=(mid_list[0:len(link_list)])
+        peer_name=remote_df["Peer Name"][0]
+        linkset_mid_tuple=list(zip(mid_list,link_list))
+        remote_df["mid"]=np.nan"""
+    elif remote_ip_type=="UNIQUE":
+        mid_list=new_cpu_df["new_module"].tolist()
+    mid_list=(mid_list[0:len(link_list)])
+    linkset_mid_tuple=list(zip(mid_list,link_list))
+    remote_df["mid"]=np.nan
+    for link in linkset_mid_tuple:
+        remote_df.loc[(remote_df["LinkSet Group"]==link[1]),"mid"]=link[0]
+    return verify_mid(hld_df,file,remote_df["mid"].tolist(),sheet)
+
+
+def find_ifmmid_set(hld_df,file,mid_list,new_cpu_df):
+    count=0
+    final_line=[]
+    dict={}
+    new_df=new_cpu_df["new_cpu_df"+str(i)]
+    for current_mid in mid_list:
         with open(dict_files["all_me_file"+str(file)],'r') as file1:
             for line in file1:
                 if (("ADD MODULE") and "MT=BSG") in line:
@@ -419,8 +472,27 @@ def verify_primary_secondary_ip(hld_df,file,ipversion,remote_df,sheet):
                         if remote_df["Link Homing"][0]=="Single":
                             break
                         elif count==2 and remote_df["Link Homing"][0]=="Multi":
-                            break  
-            if len(ifmid_list)==0:
+                            break
+        new_df.loc[new_df["new_module"]==current_mid,"ifmmid1"]=ifmid_list[0]
+        if len(ifmid_list)>1:
+            new_df.loc[new_df["new_module"]==current_mid,"ifmmid2"]=ifmid_list[1]
+    return new_cpu_df["new_cpu_df"+str(i)]
+
+def verify_primary_secondary_ip(hld_df,file,ipversion,remote_df,mid_list,sheet,new_cpu_df):
+    flag=True
+    final_line=[]
+    dict={}
+    new_cpu_df1=find_ifmmid_set(hld_df,file,mid_list,new_cpu_df)
+    for i in range(0,hld_df.shape[0]):
+            iplist=[]
+            ifmid_list=[]
+            current_mid=hld_df["DRA"+str(file)+".MID"][i]
+            ifmid_list.append(new_cpu_df1[new_cpu_df1["new_module"]==str(current_mid)]["ifmmid1"].tolist()[0])
+            if "ifmmid2" in new_cpu_df1:
+                ifmid_list.append(new_cpu_df1[new_cpu_df1["new_module"]==str(current_mid)]["ifmmid2"].tolist()[0])
+            #ifmid_list=(ifmid_list.tolist())
+            
+            if len(ifmid_list)==0 :
                 logger.error("No IFMMID found in ADD IPADDR section")
                 flag=False
                 break
@@ -450,8 +522,9 @@ def verify_primary_secondary_ip(hld_df,file,ipversion,remote_df,sheet):
                                 pass
                             else:
                                 logger.error("Error : For Single Homing, only Primary IP to be entered in input data for "+sheet)
-                elif math.isnan(hld_df['DRA'+str(file)+'.Primary IP'][i]) or math.isnan(hld_df['DRA'+str(file)+'.Secondary IP'][i]):
-                    logger.error("Error : For Multi Homing, both Primary IP and Secondary IP to be entered in input data for "+sheet)
+                elif (hld_df['DRA'+str(file)+'.Primary IP'][i])=="NA":
+                    if (hld_df['DRA'+str(file)+'.Secondary IP'][i])=="NA":
+                        logger.error("Error : For Multi Homing, both Primary IP and Secondary IP to be entered in input data for "+sheet)
                 else:
                     logger.error("Derived Primary ip for DRA"+str(file)+" doesn't match with the value in hld file")
                     flag=False
@@ -510,6 +583,14 @@ def verify_lport(hld_df,file,lport_list,sheet):
         return False
     else:
         return (True)
+
+def regport_not_in_lport(hld_df,i,sheet):
+    regport=int(config['REGPORT_SECTION']['REGPORT'])
+    lport=(hld_df["DRA"+str(i)+".LPort"].tolist())
+    if regport in lport:
+        return False
+    else:
+        return True
 
 def get_lport_list(file):
     lport_list=[]
@@ -578,25 +659,31 @@ def check_interface_peer_same(remote_df,sheet):
     return compare_dictionary_values(peer_dict)
 
 def check_all_for_interface_peer_linksetgroup(remote_df,sheet):
-    peer_interface_dict={}
     peer_interface_link_dict={}
+    list_interface=[]
     for i in range(remote_df.shape[0]):
         no_of_links=remote_df["Number of Links"][i]
         if math.isnan(no_of_links):
             continue
-        if no_of_links==1:
-            list=[]
-            cols=["Number of Links", "Protocol", "Link Homing", "Primary IP", "Secondary IP", "LinkSet Group" ]
-            for col in cols:
-                list.append(remote_df[col][i])
-            peer_interface_dict[(remote_df["Peer Name"][i],remote_df["Interface"][i])]=list
-        else:
-            list=[]
-            cols=["Protocol", "Link Homing", "Primary IP", "Secondary IP"]
-            for col in cols:
-                list.append(remote_df[col][i])
-            
-            peer_interface_link_dict[(remote_df["Peer Name"][i],remote_df["Interface"][i], remote_df["LinkSet Group"][i])]=list
+        list1=[]
+        cols=["Protocol", "Link Homing", "Primary IP", "Secondary IP"]
+        for col in cols:
+            list1.append(remote_df[col][i])
+        
+        list = [x for x in list1 if pd.isnull(x) == False]
+        if i==0:
+            peer_interface_link_dict[(remote_df["Peer Name"][0],remote_df["Interface"][0], remote_df["LinkSet Group"][0])]=set(list)
+         
+        else :
+            if remote_df["Interface"][i] not in list_interface:
+                list_interface.append(remote_df["Interface"][i])
+                peer_interface_link_dict[(remote_df["Peer Name"][i],remote_df["Interface"][i], remote_df["LinkSet Group"][i])]=set(list)
+            else:
+                if set(list)==peer_interface_link_dict[(remote_df["Peer Name"][0],remote_df["Interface"][i], remote_df["LinkSet Group"][i])]:
+                    pass
+                else:
+                    logger.error("All the rows should match in "+sheet)   
+                    return False       
     return True
 
 def get_iptype_linkset_group_for_ip(remote_df,sheet):
@@ -648,13 +735,15 @@ def check_for_same(remote_df,sheet):
                     pass
                 else:
                     logger.error("All the number of links should have same interface for a particular peer name in row "+ str(row) + " in "+sheet)
-        else:
-            
+        else:     
             logger.error("All the peer names should have same set of interfaces for "+sheet)
             return False
         if check_all_for_interface_peer_linksetgroup(remote_df,sheet):
             return True
-    return True
+        else:
+            logger.error("For every Peer Name and Interface, Number of Links, Protocol, Link Homing, Primary IP, Secondary IP and LinkSet Group should be same for the other Peer Name containing same interface in "+sheet)
+            return False
+
 
 if __name__=='__main__':
     dra_dict={}
@@ -687,30 +776,87 @@ if __name__=='__main__':
             dra_dict["dra"+str(i)+"_node"]=get_dra_node_mename(dict_files["all_me_file"+str(i)],"MENAME")
             dra_dict["dra"+str(i)+"_hostname"]=get_host_domain(i,"ADD DA",dra_dict["dra"+str(i)+"_node"],"HN")
             dra_dict["dra"+str(i)+"_domainname"]=get_host_domain(i,"ADD DA",dra_dict["dra"+str(i)+"_node"],"DN")
-            dra_dict["dra"+str(i)+"_mid"]=get_mid(cpu_df,i,dra_dict["dra"+str(i)+"_node"])
+            dra_dict["dra"+str(i)+"_mid"],new_cpu_df["new_cpu_df"+str(i)]=get_mid(cpu_df,i,dra_dict["dra"+str(i)+"_node"],new_cpu_df)
             dra_dict["dra"+str(i)+"_lport"]=get_lport_list(i)
         col_names=["Peer Name","FQDN","Domain","Protocol","IP version","Local Port","Node Role"]
-        logger.info(dra_dict)
         for remote_sheet,hld_sheet in zip(remote_file.sheet_names,hld_file.sheet_names):
-            remote_df=pd.DataFrame(pd.read_excel(remote_file_name,sheet_name=remote_sheet,engine='openpyxl'))
-            hld_df=pd.DataFrame(pd.read_excel(hld_file_name,sheet_name=hld_sheet,engine='openpyxl'))
-            size[remote_sheet]=hld_df.shape[0]
-            verify_site=(verify_remote_hld_column(remote_df,hld_df,"Site Name"))
-            if DRA_IP_TYPE=="Different":
+                remote_df=pd.DataFrame(pd.read_excel(remote_file_name,sheet_name=remote_sheet,engine='openpyxl'))
+                hld_df=pd.DataFrame(pd.read_excel(hld_file_name,sheet_name=hld_sheet,engine='openpyxl'))
+                size[remote_sheet]=hld_df.shape[0]
+                verify_site=(verify_remote_hld_column(remote_df,hld_df,"Site Name"))
+                if DRA_IP_TYPE=="Different":    
+                    for i in range(1,len(dict_files)+1):
+                        if len(dra_dict["dra"+str(i)+"_mid"])!=0:
+                            if verify_mid(hld_df,i,dra_dict["dra"+str(i)+"_mid"],hld_sheet):
+                                print("DRA"+str(i)+" MID for all rows matches with the value inferred from CPU file for "+hld_sheet)
+                    
+                            if verify_primary_secondary_ip(hld_df,i,hld_df["RemoteNode.IPv4/IPv6"][0],remote_df,dra_dict["dra"+str(i)+"_mid"],hld_sheet,new_cpu_df["new_cpu_df"+str(i)]):
+                                print("DRA"+str(i)+" Primary/Secondary IP for all rows matches with the value inferred from ALLME file for "+hld_sheet)
+                            else:
+                                logger.error("DRA"+str(i)+" "+"Primary/Secondary IP  doesn't match with the value inferred from ALLME file for "+hld_sheet)
+
+                        if verify_regport(hld_df,i,hld_sheet):
+                            print("DRA"+str(i)+" RegPortFlag and Registered Port column verified for "+hld_sheet)
+
+                        if verify_lport(hld_df,i,dra_dict["dra"+str(i)+"_lport"],hld_sheet):
+                            print("DRA"+str(i)+" LPORT column has been verified for "+hld_sheet)
+                        
+                        if verify_numberoflinks_from_linkset_interface(remote_df,remote_sheet,"LinkSet Group"):
+                            if (verify_linkset_name(remote_df,hld_df,i,remote_sheet)):
+                                print("DRA"+str(i)+" LinkSet Name for all rows matches with the value inferred for "+hld_sheet)
+                                print("DRA"+str(i)+" Link Name for all rows matches with the value inferred for "+hld_sheet)
+                        if verify_numberoflinks_from_linkset_interface(remote_df,remote_sheet,"Interface"):
+                            interface=get_interface(remote_df,hld_df,remote_sheet,DRA_IP_TYPE)
+                            if len(interface)!=0:
+                                if verify_hld_interface(interface,hld_df)==True:
+                                    print("Interfaces inferred from the input file and generated as per the output matches with the output interfaces for "+remote_sheet)
+                                else:
+                                    logger.error("Interface inferred doesn't match for "+remote_sheet)
+                            else:
+                                logger.error("Please check interface")
+                elif DRA_IP_TYPE=="Same":
+                    if (check_for_same(remote_df,remote_sheet)):
+                        print("All the checks for peer name, interface, linkset group and number of links has been verified for "+remote_sheet)
+                    remote_ip_type=get_iptype_linkset_group_for_ip(remote_df,remote_sheet)
+                    for i in range(1,len(dict_files)+1):
+                        if verify_mid_same(hld_df,i,dra_dict["dra"+str(i)+"_mid"],remote_ip_type,new_cpu_df["new_cpu_df"+str(i)],hld_sheet,remote_df):
+                            print("DRA"+str(i)+" MID for all rows matches with the value inferred from CPU file for "+hld_sheet)
+                        
+                            if verify_primary_secondary_ip(hld_df,i,hld_df["RemoteNode.IPv4/IPv6"][0],remote_df,dra_dict["dra"+str(i)+"_mid"],hld_sheet,new_cpu_df["new_cpu_df"+str(i)]):
+                                print("DRA"+str(i)+" Primary/Secondary IP for all rows matches with the value inferred from ALLME file for "+hld_sheet)
+                            else:
+                                logger.error("DRA"+str(i)+" "+"Primary/Secondary IP  doesn't match with the value inferred from ALLME file for "+hld_sheet)
+                        else:
+                            logger.error("Check DRA"+str(i)+" Mids and Primary/Secondary IP for "+hld_sheet)
+                        # if it is unique it will be same as the usual different case but still need to reuse the mids 
+                        #according to the linkset group and peer names and number of links
+                        if REGPORTFLAG=="YES":
+                            if regport_not_in_lport(hld_df,i,hld_sheet):
+                                pass
+                            else:   
+                                logger.error("Registered Port Value should not be there in DRA"+str(i)+" Lport values in "+hld_sheet)
+                        if verify_regport(hld_df,i,hld_sheet):
+                            print("DRA"+str(i)+" RegPortFlag and Registered Port column verified for "+hld_sheet)
+
+                        if verify_lport(hld_df,i,dra_dict["dra"+str(i)+"_lport"],hld_sheet):
+                            print("DRA"+str(i)+" LPORT column has been verified for "+hld_sheet)
+                        if (verify_linkset_name(remote_df,hld_df,i,remote_sheet)):
+                            print("DRA"+str(i)+" LinkSet Name for all rows matches with the value inferred for "+hld_sheet)
+                            print("DRA"+str(i)+" Link Name for all rows matches with the value inferred for "+hld_sheet)
+                        interface=get_interface(remote_df,hld_df,remote_sheet,DRA_IP_TYPE)
+                        if len(interface)!=0:
+                            if verify_hld_interface(interface,hld_df)==True:
+                                print("Interfaces inferred from the input file and generated as per the output matches with the output interfaces for "+remote_sheet)
+                            else:
+                                logger.error("Interface inferred doesn't match for "+remote_sheet)
+                        else:
+                                logger.error("Please check interface")          
                 if verify_site==True:
                     print("Site Name for all rows matches in input and output for "+remote_sheet)
                 else:
                     logger.error("Site Name doesn't match for "+remote_sheet)
                 #verify_remote_interface(remote_df)
-                if verify_numberoflinks_from_linkset_interface(remote_df,remote_sheet,"Interface"):
-                    interface=get_interface(remote_df,hld_df,remote_sheet)
-                    if len(interface)!=0:
-                        if verify_hld_interface(interface,hld_df)==True:
-                            print("Interfaces inferred from the input file and generated as per the output matches with the output interfaces for "+remote_sheet)
-                        else:
-                            logger.error("Interface inferred doesn't match for "+remote_sheet)
-                    else:
-                        logger.error("Please check interface")
+                
                 for col_name in col_names:
                     if verify_remote_hld_column(remote_df,hld_df,col_name):
                         print(col_name+" for all rows matches in input and output for "+remote_sheet)
@@ -745,37 +891,8 @@ if __name__=='__main__':
                             logger.error("DRA"+str(i)+" "+str(name)+" doesn't match with the value found in the "+hld_sheet)
                         
                     
-                    if verify_numberoflinks_from_linkset_interface(remote_df,remote_sheet,"LinkSet Group"):
-                        if (verify_linkset_name(remote_df,hld_df,i,remote_sheet)):
-                            print("DRA"+str(i)+" LinkSet Name for all rows matches with the value inferred for "+hld_sheet)
-                            print("DRA"+str(i)+" Link Name for all rows matches with the value inferred for "+hld_sheet)
-                        
-                    if len(dra_dict["dra"+str(i)+"_mid"])!=0:
-                        if verify_mid(hld_df,i,dra_dict["dra"+str(i)+"_mid"],hld_sheet):
-                            print("DRA"+str(i)+" MID for all rows matches with the value inferred from CPU file for "+hld_sheet)
-                
-                    if verify_primary_secondary_ip(hld_df,i,hld_df["RemoteNode.IPv4/IPv6"][0],remote_df,hld_sheet):
-                        print("DRA"+str(i)+" Primary/Secondary IP for all rows matches with the value inferred from ALLME file for "+hld_sheet)
-                    else:
-                        logger.error("DRA"+str(i)+" "+"Primary/Secondary IP  doesn't match with the value inferred from ALLME file for "+hld_sheet)
-
-                    if verify_regport(hld_df,i,hld_sheet):
-                        print("DRA"+str(i)+" RegPortFlag and Registered Port column verified for "+hld_sheet)
-
-                    if verify_lport(hld_df,i,dra_dict["dra"+str(i)+"_lport"],hld_sheet):
-                        print("DRA"+str(i)+" LPORT column has been verified for "+hld_sheet)
+                    
                 print("*****************************************"+hld_sheet+" columns verified ******************************************")
-            elif DRA_IP_TYPE=="Same":
-                if (check_for_same(remote_df,remote_sheet)):
-                    print("All the checks for peer name, interface, linkset group and number of links has been verified for "+remote_sheet)
-                if (get_iptype_linkset_group_for_ip(remote_df,remote_sheet))=="SAME":
-                    #same set of immid set will be used in ascending order
-                    infer_mid_set_for_same(hld_df,i,dra_dict["dra"+str(i)+"_mid"],hld_sheet)
-                else:
-                    pass
-                    # if it is unique it will be same as the usual different case but still need to reuse the mids 
-                    #according to the linkset group and peer names and number of links
-
-
+            
 if os.stat("newfile.log").st_size!=0:
     print("***************Check the log file for errors*******************")
